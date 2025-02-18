@@ -28,11 +28,6 @@ import {
 } from "obsidian";
 import { ViewPlugin } from "@codemirror/view";
 
-import {
-  Configuration as AzureConfiguration,
-  OpenAIApi as AzureOpenAIApi,
-} from "azure-openai";
-import { Configuration, OpenAIApi } from "openai";
 import * as cohere from "cohere-ai";
 import Anthropic from '@anthropic-ai/sdk';
 import ollama from "ollama"
@@ -46,6 +41,9 @@ import * as fs from "fs";
 import { toRoman } from "roman-numerals";
 import { v4 as uuidv4 } from "uuid";
 const untildify = require("untildify") as any;
+
+import { AzureOpenAI } from "openai";
+import { OpenAI } from "openai";
 
 type LoomSettingKey = keyof {
   [K in keyof LoomSettings]: LoomSettings[K];
@@ -102,8 +100,8 @@ export default class LoomPlugin extends Plugin {
   editor: Editor;
   statusBarItem: HTMLElement;
 
-  openai: OpenAIApi;
-  azure: AzureOpenAIApi;
+  openai: OpenAI;
+  azure: AzureOpenAI;
   anthropic: Anthropic;
   anthropicApiKey: string;
 
@@ -157,28 +155,23 @@ export default class LoomPlugin extends Plugin {
     if (preset === undefined) return;
 
     if (["openai", "openai-chat"].includes(preset.provider)) {
-      this.openai = new OpenAIApi(
-        new Configuration({
-          apiKey: preset.apiKey,
-          // @ts-expect-error TODO
-          organization: preset.organization,
-        })
-      );
+      const openaiPreset = preset as any;
+      const config: any = { apiKey: openaiPreset.apiKey };
+      if ('organization' in openaiPreset) {
+        config.organization = openaiPreset.organization;
+      }
+      this.openai = new OpenAI(config);
     } else if (preset.provider == "cohere") cohere.init(preset.apiKey);
     else if (preset.provider == "azure") {
-      // @ts-expect-error TODO
-      const url = preset.url;
-
-      if (!preset.apiKey || !url) return;
-      this.azure = new AzureOpenAIApi(
-        new AzureConfiguration({
-          apiKey: preset.apiKey,
-          azure: {
-            apiKey: preset.apiKey,
-            endpoint: url,
-          },
-        })
-      );
+      const azurePreset = preset as any;
+      if (!azurePreset.apiKey || !azurePreset.url) return;
+      
+      this.azure = new AzureOpenAI({
+        apiKey: azurePreset.apiKey,
+        apiVersion: "2024-02-15-preview", 
+        endpoint: azurePreset.url,
+        deployment: azurePreset.model
+      });
     } else if (preset.provider == "anthropic") {
       //(property) ClientOptions.fetch?: Fetch | undefined
       //Specify a custom fetch function implementation.
@@ -1628,7 +1621,7 @@ export default class LoomPlugin extends Plugin {
     prompt = this.trimOpenAIPrompt(prompt);
     let result: CompletionResult;
     try {
-      const response = await this.openai.createCompletion({
+      const response = await this.openai.completions.create({
         model: getPreset(this.settings).model,
         prompt,
         max_tokens: this.settings.maxTokens,
@@ -1636,17 +1629,17 @@ export default class LoomPlugin extends Plugin {
         temperature: this.settings.temperature,
         top_p: this.settings.topP,
         frequency_penalty: this.settings.frequencyPenalty,
-        presence_penalty: this.settings.presencePenalty,
+        presence_penalty: this.settings.presencePenalty
       });
       result = {
         ok: true,
-        completions: response.data.choices.map((choice) => choice.text || ""),
+        completions: response.choices.map((choice: any) => choice.text || ""),
       };
-    } catch (e) {
+    } catch (e: any) {
       result = {
         ok: false,
-        status: e.response.status,
-        message: e.response.data.error.message,
+        status: e.status,
+        message: e.message,
       };
     }
     return result;
@@ -1656,7 +1649,7 @@ export default class LoomPlugin extends Plugin {
     prompt = this.trimOpenAIPrompt(prompt);
     let result: CompletionResult;
     try {
-      const response = await this.openai.createChatCompletion({
+      const response = await this.openai.chat.completions.create({
         model: getPreset(this.settings).model,
         messages: [{ role: "assistant", content: prompt }],
         max_tokens: this.settings.maxTokens,
@@ -1664,19 +1657,19 @@ export default class LoomPlugin extends Plugin {
         temperature: this.settings.temperature,
         top_p: this.settings.topP,
         frequency_penalty: this.settings.frequencyPenalty,
-        presence_penalty: this.settings.presencePenalty,
+        presence_penalty: this.settings.presencePenalty
       });
       result = {
         ok: true,
-        completions: response.data.choices.map(
-          (choice) => choice.message?.content || ""
+        completions: response.choices.map(
+          (choice: any) => choice.message?.content || ""
         ),
       };
-    } catch (e) {
+    } catch (e: any) {
       result = {
         ok: false,
-        status: e.response.status,
-        message: e.response.data.error.message,
+        status: e.status,
+        message: e.message,
       };
     }
     return result;
@@ -1686,7 +1679,7 @@ export default class LoomPlugin extends Plugin {
     prompt = this.trimOpenAIPrompt(prompt);
     let result: CompletionResult;
     try {
-      const response = await this.azure.createCompletion({
+      const response = await this.azure.completions.create({
         model: getPreset(this.settings).model,
         prompt,
         max_tokens: this.settings.maxTokens,
@@ -1694,17 +1687,17 @@ export default class LoomPlugin extends Plugin {
         temperature: this.settings.temperature,
         top_p: this.settings.topP,
         frequency_penalty: this.settings.frequencyPenalty,
-        presence_penalty: this.settings.presencePenalty,
+        presence_penalty: this.settings.presencePenalty
       });
       result = {
         ok: true,
-        completions: response.data.choices.map((choice) => choice.text || ""),
+        completions: response.choices.map((choice: any) => choice.text || ""),
       };
-    } catch (e) {
+    } catch (e: any) {
       result = {
         ok: false,
-        status: e.response.status,
-        message: e.response.data.error.message,
+        status: e.status,
+        message: e.message,
       };
     }
     return result;
@@ -1714,7 +1707,7 @@ export default class LoomPlugin extends Plugin {
     prompt = this.trimOpenAIPrompt(prompt);
     let result: CompletionResult;
     try {
-      const response = await this.azure.createChatCompletion({
+      const response = await this.azure.chat.completions.create({
         model: getPreset(this.settings).model,
         messages: [{ role: "assistant", content: prompt }],
         max_tokens: this.settings.maxTokens,
@@ -1722,19 +1715,19 @@ export default class LoomPlugin extends Plugin {
         temperature: this.settings.temperature,
         top_p: this.settings.topP,
         frequency_penalty: this.settings.frequencyPenalty,
-        presence_penalty: this.settings.presencePenalty,
+        presence_penalty: this.settings.presencePenalty
       });
       result = {
         ok: true,
-        completions: response.data.choices.map(
-          (choice) => choice.message?.content || ""
+        completions: response.choices.map(
+          (choice: any) => choice.message?.content || ""
         ),
       };
-    } catch (e) {
+    } catch (e: any) {
       result = {
         ok: false,
-        status: e.response.status,
-        message: e.response.data.error.message,
+        status: e.status,
+        message: e.message,
       };
     }
     return result;
